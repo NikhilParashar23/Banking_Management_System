@@ -1,82 +1,129 @@
-# Terminal-Based Banking Management System
+# 🏦 Terminal-Based Banking Management System
 
-C++ console application backed by MySQL. No frontend — pure terminal UI,
-matching a C++ / MySQL / DSA background.
+A console-based banking application built in **C++** with a **MySQL** backend. No web framework, no GUI — just a menu-driven terminal program that models core banking operations with a real focus on data integrity and secure credential storage.
 
 ## Features
-- Create Account (Savings / Current) with a salted + SHA-256-hashed PIN
-- Login (account number + PIN)
-- Deposit
-- Withdraw (enforces minimum balance of ₹500 for Savings accounts)
-- Transfer between accounts — **atomic**: uses `START TRANSACTION` /
-  `COMMIT` / `ROLLBACK` so a transfer can never debit one account
-  without crediting the other
-- Balance inquiry
-- Mini statement (last 5 transactions)
 
-## Files
-| File | Purpose |
+- **Account Creation** — Savings or Current accounts, with a minimum opening balance rule for Savings
+- **Secure Login** — PIN is never stored in plain text; each account has a random salt, and only `SHA-256(salt + pin)` is stored
+- **Deposit / Withdraw** — enforces a minimum balance on Savings accounts
+- **Fund Transfer** — atomic, using MySQL's `START TRANSACTION` / `COMMIT` / `ROLLBACK`, so a transfer can never debit one account without crediting the other
+- **Balance Inquiry**
+- **Mini Statement** — last 5 transactions for an account
+
+## Tech Stack
+
+| Layer | Technology |
 |---|---|
-| `schema.sql` | Creates the database and both tables |
-| `db.h` / `db.cpp` | MySQL connection wrapper |
-| `crypto_utils.h` / `crypto_utils.cpp` | Salt generation + SHA-256 PIN hashing |
-| `account.h` / `account.cpp` | All banking logic (create, deposit, withdraw, transfer, statement) |
-| `main.cpp` | Terminal menu loop |
+| Language | C++17 |
+| Database | MySQL 8 |
+| DB Connectivity | MySQL C API (`libmysqlclient`) |
+| Security | OpenSSL (SHA-256 hashing) |
+| Interface | Terminal / Console |
 
-## Setup
+## Why These Design Choices
 
-### 1. Install dependencies (Ubuntu/Debian)
-```bash
-sudo apt-get install default-libmysqlclient-dev libssl-dev mysql-server
+**Salted password hashing.** Storing a raw PIN is a liability — anyone with database access could read it directly. Instead, each account gets a random salt at creation time, and the database stores `SHA256(salt + pin)`. Two accounts with the identical PIN end up with completely different stored hashes, which defeats precomputed rainbow-table attacks.
+
+**Atomic transfers.** `Account::transfer()` wraps the debit, the credit, and both transaction-log inserts inside a single MySQL transaction. If any one step fails, `rollback()` undoes everything already applied in that transaction, so the system can never land in a state where money left one account but never reached the other. This is the **Atomicity** property from ACID, applied directly rather than just described.
+
+**Business rules enforced before hitting the DB.** Minimum-balance checks happen in C++ before any withdrawal or transfer query is even sent, so invalid operations never touch the database layer.
+
+## Project Structure
+
+```
+banking_system/
+├── main.cpp              # Terminal menu loop, program entry point
+├── db.h / db.cpp         # MySQL connection wrapper (connect, query, transaction control)
+├── account.h / account.cpp   # Core banking logic: create, login, deposit, withdraw, transfer, statement
+├── crypto_utils.h / crypto_utils.cpp  # Salt generation + SHA-256 PIN hashing
+├── schema.sql             # Database and table definitions
+└── README.md
 ```
 
-### 2. Create the database
+## Database Schema
+
+**`accounts`**
+| Column | Type | Notes |
+|---|---|---|
+| account_no | INT, PK, auto-increment | |
+| name | VARCHAR(100) | |
+| salt | VARCHAR(32) | random per-account salt |
+| pin_hash | VARCHAR(64) | SHA-256 hex digest of salt + pin |
+| account_type | ENUM('SAVINGS','CURRENT') | |
+| balance | DECIMAL(15,2) | |
+| status | ENUM('ACTIVE','INACTIVE') | |
+| created_at | TIMESTAMP | |
+
+**`transactions`**
+| Column | Type | Notes |
+|---|---|---|
+| txn_id | INT, PK, auto-increment | |
+| account_no | INT, FK → accounts | |
+| type | ENUM('DEPOSIT','WITHDRAW','TRANSFER_OUT','TRANSFER_IN') | |
+| amount | DECIMAL(15,2) | |
+| balance_after | DECIMAL(15,2) | avoids recomputation when printing a statement |
+| related_account_no | INT, nullable | set only for transfers |
+| txn_time | TIMESTAMP | |
+
+## Setup & Installation
+
+### 1. Install dependencies
 ```bash
-sudo mysql -u root -p < schema.sql
+sudo apt-get update
+sudo apt-get install mysql-server default-libmysqlclient-dev libssl-dev build-essential
 ```
 
-### 3. Set your credentials
-Open `main.cpp` and update this line with your actual MySQL username/password:
+### 2. Start MySQL
+```bash
+sudo service mysql start
+```
+
+### 3. Create the database
+```bash
+mysql -u root -p < schema.sql
+```
+
+### 4. Configure your credentials
+Open `main.cpp` and update this line with your MySQL username/password:
 ```cpp
 Database db("127.0.0.1", "root", "your_mysql_password", "bank_system");
 ```
 
-### 4. Compile
+### 5. Compile
 ```bash
 g++ -std=c++17 main.cpp db.cpp account.cpp crypto_utils.cpp -o bank_app \
     $(mysql_config --cflags --libs) -lssl -lcrypto
 ```
 
-### 5. Run
+### 6. Run
 ```bash
 ./bank_app
 ```
 
-## Key design points to mention in your interview
+## Sample Usage
 
-1. **Password security**: PINs are never stored in plain text. Each account
-   gets a random salt; the stored hash is `SHA256(salt + pin)`. Salting
-   means two users with the same PIN get completely different hashes,
-   which defeats precomputed rainbow-table attacks.
+```
+===== BANKING MANAGEMENT SYSTEM =====
+1. Create Account
+2. Login
+3. Exit
+Choose an option: 1
 
-2. **Transaction atomicity (transfer)**: `Account::transfer()` wraps the
-   debit, credit, and both transaction-log inserts in a single MySQL
-   transaction. If any step fails, `rollback()` undoes everything already
-   done in that transaction — so the system can never end up in a state
-   where money left one account but never reached the other. This is the
-   ACID property of **Atomicity** in action.
+Enter name: Aisha Khan
+Set a PIN (4-6 digits): 4821
+Account type (1 = SAVINGS, 2 = CURRENT): 1
+Initial deposit: 1000
+Account created successfully! Your account number is: 1
+```
 
-3. **Data integrity via schema**: `transactions.account_no` has a foreign
-   key into `accounts`, so you cannot log a transaction against an account
-   that doesn't exist. `balance_after` is stored per transaction so a
-   statement can be printed without recomputing running totals.
+## Possible Future Improvements
 
-4. **Business rule enforcement in the app layer**: minimum balance for
-   Savings accounts is checked in C++ before any withdrawal or transfer
-   is attempted, so invalid operations never even reach the database.
-
-## Possible extensions if you have time
-- Admin menu (view all accounts, freeze/unfreeze an account)
-- Simple fraud-flagging: log a transaction to a `flagged_transactions`
-  table if the amount exceeds a threshold
+- Admin panel to view all accounts and freeze/unfreeze one
+- Rule-based fraud flagging (e.g. large or rapid transactions logged to a `flagged_transactions` table)
 - Interest calculation for Savings accounts
+- Unit tests for balance and transfer edge cases
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
