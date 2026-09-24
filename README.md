@@ -110,10 +110,10 @@ g++ -std=c++17 main.cpp db.cpp account.cpp crypto_utils.cpp -o bank_app \
 3. Exit
 Choose an option: 1
 
-Enter name: Aisha Khan
+Enter name: Nikhil Parashar
 Set a PIN (4-6 digits): 4821
 Account type (1 = SAVINGS, 2 = CURRENT): 1
-Initial deposit: 1000
+Initial deposit: 2000
 Account created successfully! Your account number is: 1
 ```
 
