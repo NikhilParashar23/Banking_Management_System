@@ -1,0 +1,4 @@
+bank_app
+*.o
+.vscode/
+.DS_Store
